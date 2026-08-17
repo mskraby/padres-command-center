@@ -697,6 +697,162 @@ def get_bullpen_fatigue(team_id, season, days_back=30):
         df = df.sort_values(by=['3-in-3 Days', 'Heavy 2-Day Stretch', 'Outings'], ascending=False).reset_index(drop=True)
     return df
 
+@st.cache_data(ttl=1800)
+def get_next_series(team_id=135):
+    """Groups the upcoming schedule into the next consecutive series vs. one opponent."""
+    try:
+        games = statsapi.schedule(team=team_id, start_date=datetime.now().strftime("%m/%d/%Y"), end_date=(datetime.now() + timedelta(days=15)).strftime("%m/%d/%Y"))
+        upcoming = [g for g in games if g['status'] != 'Final']
+        if not upcoming:
+            return [], None, None
+        anchor = upcoming[0]
+        anchor_opp_id = anchor['home_id'] if anchor['away_id'] == team_id else anchor['away_id']
+        anchor_opp_name = anchor['home_name'] if anchor['away_id'] == team_id else anchor['away_name']
+        series = []
+        for g in upcoming:
+            g_opp_id = g['home_id'] if g['away_id'] == team_id else g['away_id']
+            if g_opp_id != anchor_opp_id:
+                break
+            series.append(g)
+        return series, anchor_opp_id, anchor_opp_name
+    except Exception:
+        return [], None, None
+
+@st.cache_data(ttl=3600)
+def get_team_snapshot(team_id, season):
+    """Fetches a team's current record, streak, division rank, and run differential."""
+    try:
+        data = statsapi.get('standings', {'leagueId': '103,104', 'season': season})
+        for rec in data.get('records', []):
+            for t in rec.get('teamRecords', []):
+                if t.get('team', {}).get('id') == team_id:
+                    streak = t.get('streak', {})
+                    return {
+                        'wins': t.get('wins', 0),
+                        'losses': t.get('losses', 0),
+                        'div_rank': t.get('divisionRank', '—'),
+                        'gb': t.get('divisionGamesBack', '—'),
+                        'streak': streak.get('streakCode', '—'),
+                        'run_diff': t.get('runDifferential', 0)
+                    }
+    except Exception:
+        pass
+    return None
+
+@st.cache_data(ttl=3600)
+def get_season_series_record(opp_id, season, team_id=135):
+    """Computes this season's regular-season head-to-head record between the Padres and an opponent."""
+    try:
+        games = statsapi.schedule(team=team_id, opponent=opp_id, start_date=f"01/01/{season}", end_date=datetime.now().strftime("%m/%d/%Y"))
+        wins, losses = 0, 0
+        for g in games:
+            if g['status'] != 'Final' or g.get('game_type') != 'R':
+                continue
+            is_home = g['home_id'] == team_id
+            sd_score = safe_int(g['home_score'] if is_home else g['away_score'])
+            opp_score = safe_int(g['away_score'] if is_home else g['home_score'])
+            if sd_score > opp_score:
+                wins += 1
+            else:
+                losses += 1
+        return f"{wins}-{losses}"
+    except Exception:
+        return "—"
+
+@st.cache_data(ttl=3600)
+def get_recent_batting_splits(team_id, days_back=15):
+    """Fetches recent (last N days) hitting stats for a team's active hitters, batched in one call."""
+    try:
+        start = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        end = datetime.now().strftime('%Y-%m-%d')
+        roster = statsapi.get('team_roster', {'teamId': team_id, 'rosterType': 'active'})
+        hitter_ids = [str(p['person']['id']) for p in roster.get('roster', []) if p.get('position', {}).get('abbreviation') != 'P']
+        if not hitter_ids:
+            return pd.DataFrame()
+        data = statsapi.get('people', {
+            'personIds': ",".join(hitter_ids),
+            'hydrate': f'stats(group=[hitting],type=[byDateRange],startDate={start},endDate={end})'
+        })
+        rows, seen = [], set()
+        for person in data.get('people', []):
+            name = person.get('fullName', 'Unknown')
+            for stat_rec in person.get('stats', []):
+                for s in stat_rec.get('splits', []):
+                    if name in seen:
+                        continue
+                    ab = safe_int(s['stat'].get('atBats'))
+                    if ab >= 8:
+                        seen.add(name)
+                        rows.append({
+                            'Player': name, 'AB': ab,
+                            'AVG': s['stat'].get('avg', '.000'),
+                            'OPS': safe_float(s['stat'].get('ops')),
+                            'HR': safe_int(s['stat'].get('homeRuns')),
+                            'RBI': safe_int(s['stat'].get('rbi'))
+                        })
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_recent_pitching_splits(team_id, days_back=30):
+    """Fetches recent (last N days) pitching stats for a team's active pitchers, batched in one call."""
+    try:
+        start = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        end = datetime.now().strftime('%Y-%m-%d')
+        roster = statsapi.get('team_roster', {'teamId': team_id, 'rosterType': 'active'})
+        pitcher_ids = [str(p['person']['id']) for p in roster.get('roster', []) if p.get('position', {}).get('abbreviation') == 'P']
+        if not pitcher_ids:
+            return pd.DataFrame()
+        data = statsapi.get('people', {
+            'personIds': ",".join(pitcher_ids),
+            'hydrate': f'stats(group=[pitching],type=[byDateRange],startDate={start},endDate={end})'
+        })
+        rows, seen = [], set()
+        for person in data.get('people', []):
+            name = person.get('fullName', 'Unknown')
+            for stat_rec in person.get('stats', []):
+                for s in stat_rec.get('splits', []):
+                    if name in seen:
+                        continue
+                    ip = safe_float(s['stat'].get('inningsPitched'))
+                    if ip >= 3:
+                        seen.add(name)
+                        rows.append({
+                            'Pitcher': name,
+                            'IP': s['stat'].get('inningsPitched', '0.0'),
+                            'ERA': safe_float(s['stat'].get('era')),
+                            'WHIP': safe_float(s['stat'].get('whip')),
+                            'K': safe_int(s['stat'].get('strikeOuts'))
+                        })
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=1800)
+def get_team_news(team_name, limit=6):
+    """Fetches recent news headlines for a team via Google News RSS."""
+    try:
+        query = f"{team_name} MLB".replace(" ", "+")
+        url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+        res = requests.get(url, headers={'User-Agent': 'PadresRadioApp/1.0'}, timeout=6)
+        feed = feedparser.parse(res.content if res.status_code == 200 else url)
+        items = []
+        for entry in feed.entries[:limit]:
+            source = entry.get('source', {}).get('title', '')
+            title = entry.get('title', '')
+            if source and title.endswith(f" - {source}"):
+                title = title[: -(len(source) + 3)]
+            items.append({
+                'title': title,
+                'link': entry.get('link', ''),
+                'published': entry.get('published', '')[:16],
+                'source': source
+            })
+        return items
+    except Exception:
+        return []
+
 # ==========================================
 # 4. DASHBOARD HEADER & TAB SETUP
 # ==========================================
@@ -707,8 +863,8 @@ st.markdown("---")
 today = datetime.now()
 padres_roster_map = get_padres_roster_map(today.year)
 
-tab_brief, tab1, tab_injury, tab2, tab_bullpen, tab3, tab4, tab5, tab6 = st.tabs([
-    "📋 Show Briefing", "📊 Padres Hub", "🏥 Injury Report", "🎙️ Studio Prep",
+tab_brief, tab1, tab_injury, tab_series, tab2, tab_bullpen, tab3, tab4, tab5, tab6 = st.tabs([
+    "📋 Show Briefing", "📊 Padres Hub", "🏥 Injury Report", "🔭 Series Scout", "🎙️ Studio Prep",
     "🎯 Bullpen & Shutdown", "🗣️ Fan Zone", "🌎 Around MLB", "🔬 Advanced Analytics", "🏆 Daily Rewind"
 ])
 
@@ -1078,6 +1234,95 @@ with tab_injury:
                     st.caption(m['Details'])
         else:
             st.caption("No recent transactions found.")
+
+# ==========================================
+# TAB: SERIES SCOUT
+# ==========================================
+with tab_series:
+    st.markdown("### 🔭 Series Scout — Next Opponent Deep Dive")
+    st.markdown("---")
+
+    series_games, opp_id, opp_name = get_next_series()
+
+    if not opp_id:
+        st.info("No upcoming series found.")
+    else:
+        snap = get_team_snapshot(opp_id, today.year)
+        series_record = get_season_series_record(opp_id, today.year)
+
+        hc1, hc2, hc3, hc4 = st.columns(4)
+        with hc1:
+            dates = ", ".join(g['game_date'][5:] for g in series_games)
+            venue = "Home" if series_games[0]['home_id'] == 135 else "Away"
+            st.metric("Next Series", opp_name)
+            st.caption(f"{len(series_games)} game(s) ({venue}): {dates}")
+        with hc2:
+            if snap:
+                st.metric(f"{opp_name} Record", f"{snap['wins']}-{snap['losses']}", delta=f"Streak: {snap['streak']}")
+            else:
+                st.metric(f"{opp_name} Record", "—")
+        with hc3:
+            if snap:
+                st.metric("Division Rank", f"#{snap['div_rank']}", delta=f"GB: {snap['gb']}")
+            else:
+                st.metric("Division Rank", "—")
+        with hc4:
+            st.metric("Season Series vs SD", series_record)
+
+        st.markdown("---")
+        st.markdown(f"### 🌡️ Who's Hot & Who's Cold: {opp_name} Hitters (Last 15 Days)")
+        bat_df = get_recent_batting_splits(opp_id, 15)
+        h1, h2 = st.columns(2)
+        with h1:
+            st.markdown("#### 🔥 Hot Hitters")
+            if not bat_df.empty:
+                st.dataframe(bat_df.sort_values(by='OPS', ascending=False).head(5), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Recent hitting data updating...")
+        with h2:
+            st.markdown("#### 🥶 Cold Hitters")
+            if not bat_df.empty:
+                st.dataframe(bat_df.sort_values(by='OPS', ascending=True).head(5), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Recent hitting data updating...")
+
+        st.markdown("---")
+        st.markdown(f"### ⚾ Arms: Hot & Cold (Last 30 Days)")
+        pitch_df = get_recent_pitching_splits(opp_id, 30)
+        p1, p2 = st.columns(2)
+        with p1:
+            st.markdown("#### 🔥 Hot Arms (Lowest ERA)")
+            if not pitch_df.empty:
+                st.dataframe(pitch_df.sort_values(by='ERA', ascending=True).head(5), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Recent pitching data updating...")
+        with p2:
+            st.markdown("#### 🥶 Cold Arms (Highest ERA)")
+            if not pitch_df.empty:
+                st.dataframe(pitch_df.sort_values(by='ERA', ascending=False).head(5), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Recent pitching data updating...")
+
+        st.markdown("---")
+        st.markdown(f"### 🏥 {opp_name} Injury Report")
+        opp_il = get_injury_report(opp_id)
+        if opp_il:
+            st.dataframe(pd.DataFrame(opp_il), use_container_width=True, hide_index=True)
+        else:
+            st.success(f"No {opp_name} players currently on the IL.")
+
+        st.markdown("---")
+        st.markdown(f"### 📰 Latest {opp_name} News")
+        news = get_team_news(opp_name)
+        if news:
+            n_cols = st.columns(2)
+            for idx, n in enumerate(news):
+                with n_cols[idx % 2]:
+                    with st.container(border=True):
+                        st.markdown(f"**[{n['title']}]({n['link']})**")
+                        st.caption(f"{n['source']} · {n['published']}" if n['source'] else n['published'])
+        else:
+            st.caption("News feed unavailable.")
 
 # ==========================================
 # TAB 2: STUDIO PREP
