@@ -942,13 +942,13 @@ with tab_brief:
     with snap1:
         st.markdown("#### 🏥 Injury List Snapshot")
         if il_list:
-            st.dataframe(pd.DataFrame(il_list), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(il_list), width='stretch', hide_index=True)
         else:
             st.success("No Padres players currently on the IL. 🎉")
     with snap2:
         st.markdown("#### 😮‍💨 Bullpen Workload (Last 30 Days)")
         if not bp_df.empty:
-            st.dataframe(bp_df.head(6), use_container_width=True, hide_index=True)
+            st.dataframe(bp_df.head(6), width='stretch', hide_index=True)
         else:
             st.caption("Bullpen workload data updating...")
 
@@ -983,7 +983,7 @@ with tab1:
         with sc_col3:
             st.markdown("**NL Wild Card Race Snapshot**")
             if not nl_wc_df.empty:
-                st.dataframe(nl_wc_df.head(6), use_container_width=True, hide_index=True)
+                st.dataframe(nl_wc_df.head(6), width='stretch', hide_index=True)
             else:
                 st.caption("NL Wild Card standings updating...")
 
@@ -1061,7 +1061,7 @@ with tab1:
                                 teams_t = linescore.get('teams', {})
                                 away_row.extend([teams_t.get('away', {}).get('runs', 0), teams_t.get('away', {}).get('hits', 0), teams_t.get('away', {}).get('errors', 0)])
                                 home_row.extend([teams_t.get('home', {}).get('runs', 0), teams_t.get('home', {}).get('hits', 0), teams_t.get('home', {}).get('errors', 0)])
-                                st.dataframe(pd.DataFrame([away_row, home_row], columns=headers), use_container_width=True, hide_index=True)
+                                st.dataframe(pd.DataFrame([away_row, home_row], columns=headers), width='stretch', hide_index=True)
                             except Exception:
                                 st.caption("Inning-by-inning data unavailable.")
                                 
@@ -1072,19 +1072,19 @@ with tab1:
                             with s_col1:
                                 st.markdown("⚡ **Fastest Pitches**")
                                 if t_pitches:
-                                    st.dataframe(pd.DataFrame(t_pitches), use_container_width=True, hide_index=True)
+                                    st.dataframe(pd.DataFrame(t_pitches), width='stretch', hide_index=True)
                                 else:
                                     st.caption("No velocity data.")
                             with s_col2:
                                 st.markdown("🔥 **Hardest Hit**")
                                 if t_hard:
-                                    st.dataframe(pd.DataFrame(t_hard), use_container_width=True, hide_index=True)
+                                    st.dataframe(pd.DataFrame(t_hard), width='stretch', hide_index=True)
                                 else:
                                     st.caption("No exit velocity data.")
                             with s_col3:
                                 st.markdown("📏 **Hit Distance**")
                                 if t_dist:
-                                    st.dataframe(pd.DataFrame(t_dist), use_container_width=True, hide_index=True)
+                                    st.dataframe(pd.DataFrame(t_dist), width='stretch', hide_index=True)
                                 else:
                                     st.caption("No distance data.")
                                 
@@ -1153,7 +1153,7 @@ with tab1:
                                                     return [''] * len(row)
 
                                                 styled_bvp = bvp_df.style.apply(highlight_300, axis=1)
-                                                st.dataframe(styled_bvp, use_container_width=True, hide_index=True)
+                                                st.dataframe(styled_bvp, width='stretch', hide_index=True)
                                             else:
                                                 st.caption("No historical matchups.")
                                         else:
@@ -1180,8 +1180,8 @@ with tab1:
             with p_col2:
                 st.markdown("#### ⚡ Star Player 162-Game Projections")
                 h_tab, p_tab = st.tabs(["🏏 Big Three Hitters", "🔥 Reliever Focus (Mason Miller)"])
-                with h_tab: st.dataframe(pd.DataFrame(ai_proj['hitters']), use_container_width=True, hide_index=True)
-                with p_tab: st.dataframe(pd.DataFrame(ai_proj['pitchers']), use_container_width=True, hide_index=True)
+                with h_tab: st.dataframe(pd.DataFrame(ai_proj['hitters']), width='stretch', hide_index=True)
+                with p_tab: st.dataframe(pd.DataFrame(ai_proj['pitchers']), width='stretch', hide_index=True)
 
     st.markdown("---")
     st.markdown("### 📊 Sortable Player Hitting Stats")
@@ -1202,7 +1202,7 @@ with tab1:
                         "OPS": float(st_data.get('ops', '.000')),
                         "SB": st_data.get('stolenBases', 0)
                     })
-            st.dataframe(pd.DataFrame(p_list), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(p_list), width='stretch', hide_index=True)
     except Exception as e:
         st.error(f"Couldn't load stats table: {e}")
 
@@ -1219,7 +1219,7 @@ with tab_injury:
     with ic1:
         st.markdown("#### 🩹 Currently on the Injured List")
         if il_list:
-            st.dataframe(pd.DataFrame(il_list), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(il_list), width='stretch', hide_index=True)
             st.caption(f"{len(il_list)} player(s) on the IL.")
         else:
             st.success("No Padres players currently on the Injured List.")
@@ -1276,13 +1276,13 @@ with tab_series:
         with h1:
             st.markdown("#### 🔥 Hot Hitters")
             if not bat_df.empty:
-                st.dataframe(bat_df.sort_values(by='OPS', ascending=False).head(5), use_container_width=True, hide_index=True)
+                st.dataframe(bat_df.sort_values(by='OPS', ascending=False).head(5), width='stretch', hide_index=True)
             else:
                 st.caption("Recent hitting data updating...")
         with h2:
             st.markdown("#### 🥶 Cold Hitters")
             if not bat_df.empty:
-                st.dataframe(bat_df.sort_values(by='OPS', ascending=True).head(5), use_container_width=True, hide_index=True)
+                st.dataframe(bat_df.sort_values(by='OPS', ascending=True).head(5), width='stretch', hide_index=True)
             else:
                 st.caption("Recent hitting data updating...")
 
@@ -1293,13 +1293,13 @@ with tab_series:
         with p1:
             st.markdown("#### 🔥 Hot Arms (Lowest ERA)")
             if not pitch_df.empty:
-                st.dataframe(pitch_df.sort_values(by='ERA', ascending=True).head(5), use_container_width=True, hide_index=True)
+                st.dataframe(pitch_df.sort_values(by='ERA', ascending=True).head(5), width='stretch', hide_index=True)
             else:
                 st.caption("Recent pitching data updating...")
         with p2:
             st.markdown("#### 🥶 Cold Arms (Highest ERA)")
             if not pitch_df.empty:
-                st.dataframe(pitch_df.sort_values(by='ERA', ascending=False).head(5), use_container_width=True, hide_index=True)
+                st.dataframe(pitch_df.sort_values(by='ERA', ascending=False).head(5), width='stretch', hide_index=True)
             else:
                 st.caption("Recent pitching data updating...")
 
@@ -1307,7 +1307,7 @@ with tab_series:
         st.markdown(f"### 🏥 {opp_name} Injury Report")
         opp_il = get_injury_report(opp_id)
         if opp_il:
-            st.dataframe(pd.DataFrame(opp_il), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(opp_il), width='stretch', hide_index=True)
         else:
             st.success(f"No {opp_name} players currently on the IL.")
 
@@ -1380,7 +1380,7 @@ with tab_bullpen:
     with b1:
         st.markdown("#### 😮‍💨 Reliever Workload (Last 30 Days)")
         if not bp_df.empty:
-            st.dataframe(bp_df, use_container_width=True, hide_index=True)
+            st.dataframe(bp_df, width='stretch', hide_index=True)
             st.caption("3-in-3 Days = appeared in 3 straight games. Heavy 2-Day Stretch = 40+ pitches across back-to-back outings.")
         else:
             st.caption("Bullpen workload data updating...")
@@ -1389,7 +1389,7 @@ with tab_bullpen:
         st.markdown("#### 📉 Shutdown Failure Pitcher Tally (Last 45 Days)")
         if sd_pitcher_counts:
             tally_df = pd.DataFrame(sd_pitcher_counts.most_common(), columns=['Pitcher', 'Failures'])
-            st.dataframe(tally_df, use_container_width=True, hide_index=True)
+            st.dataframe(tally_df, width='stretch', hide_index=True)
         else:
             st.caption("No shutdown failures logged in this window.")
 
@@ -1402,7 +1402,7 @@ with tab_bullpen:
 
     if sd_failures:
         st.markdown("#### 🗒️ Failure Log")
-        st.dataframe(pd.DataFrame(sd_failures), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(sd_failures), width='stretch', hide_index=True)
 
     st.markdown("---")
     st.markdown("#### 🏆 League-Wide Shutdown Failure Benchmark")
@@ -1412,7 +1412,7 @@ with tab_bullpen:
         padres_rank_row = league_df[league_df['Team'].str.contains('Padres', case=False)]
         if not padres_rank_row.empty:
             st.info(f"🤎 Padres rank **#{int(padres_rank_row.iloc[0]['Rank'])} of {len(league_df)}** in shutdown failure rate ({padres_rank_row.iloc[0]['Failure %']}%).")
-        st.dataframe(league_df, use_container_width=True, hide_index=True)
+        st.dataframe(league_df, width='stretch', hide_index=True)
     else:
         st.caption("League benchmark data updating...")
 
@@ -1481,28 +1481,28 @@ with tab4:
             with lt1:
                 hr_df = get_clean_leaders('homeRuns', 'hitting', today.year)
                 if not hr_df.empty:
-                    st.dataframe(hr_df, use_container_width=True, hide_index=True)
+                    st.dataframe(hr_df, width='stretch', hide_index=True)
                 else:
                     st.caption("Home Run leaders updating...")
                     
             with lt2:
                 ops_df = get_clean_leaders('onBasePlusSlugging', 'hitting', today.year)
                 if not ops_df.empty:
-                    st.dataframe(ops_df, use_container_width=True, hide_index=True)
+                    st.dataframe(ops_df, width='stretch', hide_index=True)
                 else:
                     st.caption("OPS leaders updating...")
                     
             with lt3:
                 era_df = get_clean_leaders('earnedRunAverage', 'pitching', today.year)
                 if not era_df.empty:
-                    st.dataframe(era_df, use_container_width=True, hide_index=True)
+                    st.dataframe(era_df, width='stretch', hide_index=True)
                 else:
                     st.caption("ERA leaders updating...")
                     
             with lt4:
                 so_df = get_clean_leaders('strikeouts', 'pitching', today.year)
                 if not so_df.empty:
-                    st.dataframe(so_df, use_container_width=True, hide_index=True)
+                    st.dataframe(so_df, width='stretch', hide_index=True)
                 else:
                     st.caption("Strikeout leaders updating...")
 
@@ -1514,7 +1514,7 @@ with tab4:
         st.markdown("#### 🟦 National League Wild Card")
         nl_wc_df = get_wildcard_standings(104)
         if not nl_wc_df.empty:
-            st.dataframe(nl_wc_df, use_container_width=True, hide_index=True)
+            st.dataframe(nl_wc_df, width='stretch', hide_index=True)
         else:
             st.caption("NL Wild Card standings updating...")
             
@@ -1522,7 +1522,7 @@ with tab4:
         st.markdown("#### 🟥 American League Wild Card")
         al_wc_df = get_wildcard_standings(103)
         if not al_wc_df.empty:
-            st.dataframe(al_wc_df, use_container_width=True, hide_index=True)
+            st.dataframe(al_wc_df, width='stretch', hide_index=True)
         else:
             st.caption("AL Wild Card standings updating...")
 
@@ -1536,7 +1536,7 @@ with tab4:
         col = nl_c1 if "East" in d_name else (nl_c2 if "Central" in d_name else nl_c3)
         with col:
             st.markdown(f"**{d_name}**")
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
 
     st.markdown("#### 🟥 American League Divisions")
     al_c1, al_c2, al_c3 = st.columns(3)
@@ -1545,7 +1545,7 @@ with tab4:
         col = al_c1 if "East" in d_name else (al_c2 if "Central" in d_name else al_c3)
         with col:
             st.markdown(f"**{d_name}**")
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
 
 # ==========================================
 # TAB 5: ADVANCED ANALYTICS
@@ -1583,9 +1583,9 @@ with tab5:
             cols = [c for c in desired_h_cols if c in p_h.columns]
             if cols:
                 sort_col = 'WAR' if 'WAR' in cols else cols[0]
-                st.dataframe(p_h[cols].sort_values(by=sort_col, ascending=False), use_container_width=True, hide_index=True)
+                st.dataframe(p_h[cols].sort_values(by=sort_col, ascending=False), width='stretch', hide_index=True)
             else:
-                st.dataframe(p_h, use_container_width=True, hide_index=True)
+                st.dataframe(p_h, width='stretch', hide_index=True)
         else: 
             st.caption("Padres hitting data updating...")
         
@@ -1597,9 +1597,9 @@ with tab5:
             cols = [c for c in desired_p_cols if c in p_p.columns]
             if cols:
                 sort_col = 'WAR' if 'WAR' in cols else cols[0]
-                st.dataframe(p_p[cols].sort_values(by=sort_col, ascending=False), use_container_width=True, hide_index=True)
+                st.dataframe(p_p[cols].sort_values(by=sort_col, ascending=False), width='stretch', hide_index=True)
             else:
-                st.dataframe(p_p, use_container_width=True, hide_index=True)
+                st.dataframe(p_p, width='stretch', hide_index=True)
         else: 
             st.caption("Padres pitching data updating...")
 
@@ -1639,13 +1639,13 @@ with tab6:
     with rc1:
         st.markdown("#### 🏏 Top Hitters (Yesterday)")
         if top_h:
-            st.dataframe(pd.DataFrame(top_h).head(10), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(top_h).head(10), width='stretch', hide_index=True)
         else:
             st.caption("No standout hitters.")
             
     with rc2:
         st.markdown("#### ⚾ Top Pitchers (Yesterday)")
         if top_p:
-            st.dataframe(pd.DataFrame(top_p).head(10), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(top_p).head(10), width='stretch', hide_index=True)
         else:
             st.caption("No standout pitchers.")
