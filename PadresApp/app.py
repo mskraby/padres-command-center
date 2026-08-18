@@ -97,7 +97,8 @@ def get_full_standings(league_id):
                     "W": team.get('w', 0),
                     "L": team.get('l', 0),
                     "PCT": pct_str,
-                    "GB": gb
+                    "GB": gb,
+                    "_id": team.get('team_id') or team.get('id')
                 })
             standings_dict[div_name] = pd.DataFrame(team_list)
     except Exception:
@@ -219,10 +220,13 @@ def get_padres_wc_hub_data():
     return y_status_label, y_delta_str, y_color, wc_df, padres_row
 
 @st.cache_data(ttl=14400)
-def get_clean_leaders(stat_type, stat_group, season):
-    """Parses statsapi.league_leaders output into a structured DataFrame."""
+def get_clean_leaders(stat_type, stat_group, season, league_id=None):
+    """Parses statsapi.league_leaders output into a structured DataFrame. league_id: 103=AL, 104=NL, None=MLB-wide."""
     try:
-        raw = statsapi.league_leaders(stat_type, statGroup=stat_group, limit=5, season=season)
+        kwargs = {'statGroup': stat_group, 'limit': 5, 'season': season}
+        if league_id:
+            kwargs['leagueId'] = league_id
+        raw = statsapi.league_leaders(stat_type, **kwargs)
         lines = [l.strip() for l in raw.split('\n') if l.strip()]
         if len(lines) <= 1:
             return pd.DataFrame()
@@ -302,98 +306,6 @@ def get_bvp_matchups(opp_id, padres_ids, padres_map):
         pass
     return bvp_list
 
-@st.cache_data(ttl=43200)
-def get_savant_game_leaderboards(game_pk):
-    """Fetches top Statcast speed, exit velocity, and distance metrics for a single game."""
-    fastest_pitches, hardest_hits, furthest_hits = [], [], []
-    
-    try:
-        df = pyb.statcast_single_game(game_pk)
-        if df is not None and not df.empty:
-            if 'release_speed' in df.columns:
-                p_df = df.dropna(subset=['release_speed']).sort_values(by='release_speed', ascending=False)
-                for _, row in p_df.head(5).iterrows():
-                    fastest_pitches.append({
-                        "Pitcher": row.get('player_name', 'Pitcher'),
-                        "Speed (mph)": f"{safe_float(row.get('release_speed')):.1f}",
-                        "Pitch Type": str(row.get('pitch_type', 'Pitch'))
-                    })
-            if 'launch_speed' in df.columns:
-                h_df = df.dropna(subset=['launch_speed']).sort_values(by='launch_speed', ascending=False)
-                for _, row in h_df.head(5).iterrows():
-                    des = row.get('des', row.get('description', 'In play'))
-                    hardest_hits.append({
-                        "Play / Batter": des[:38] + "..." if len(des) > 38 else des,
-                        "Exit Vel (mph)": f"{safe_float(row.get('launch_speed')):.1f}",
-                        "Distance": f"{safe_int(row.get('launch_distance'))} ft",
-                        "Result": str(row.get('events', 'In Play')).replace('_', ' ').title()
-                    })
-            if 'launch_distance' in df.columns:
-                d_df = df.dropna(subset=['launch_distance']).sort_values(by='launch_distance', ascending=False)
-                for _, row in d_df.head(5).iterrows():
-                    des = row.get('des', row.get('description', 'In play'))
-                    furthest_hits.append({
-                        "Play / Batter": des[:38] + "..." if len(des) > 38 else des,
-                        "Distance": f"{safe_int(row.get('launch_distance'))} ft",
-                        "Exit Vel (mph)": f"{safe_float(row.get('launch_speed')):.1f}",
-                        "Result": str(row.get('events', 'In Play')).replace('_', ' ').title()
-                    })
-            if fastest_pitches or hardest_hits or furthest_hits:
-                return fastest_pitches, hardest_hits, furthest_hits
-    except Exception:
-        pass
-
-    try:
-        game_data = statsapi.get('game', {'gamePk': game_pk})
-        all_plays = game_data.get('liveData', {}).get('plays', {}).get('allPlays', [])
-        pitches_list, hits_list = [], []
-        
-        for play in all_plays:
-            matchup = play.get('matchup', {})
-            pitcher_name = matchup.get('pitcher', {}).get('fullName', 'Pitcher')
-            batter_name = matchup.get('batter', {}).get('fullName', 'Batter')
-            event_result = play.get('result', {}).get('event', 'In Play')
-            des = play.get('result', {}).get('description', '')
-            
-            for ev in play.get('playEvents', []):
-                pdata = ev.get('pitchData', {})
-                if 'startSpeed' in pdata:
-                    speed = safe_float(pdata['startSpeed'])
-                    pitches_list.append({
-                        "Pitcher": pitcher_name,
-                        "Speed (mph)": f"{speed:.1f}",
-                        "Pitch Type": ev.get('details', {}).get('type', {}).get('description', 'Pitch'),
-                        "val": speed
-                    })
-                hdata = pdata.get('hitData', {})
-                if 'launchSpeed' in hdata or 'totalDistance' in hdata:
-                    ev_speed = safe_float(hdata.get('launchSpeed'))
-                    dist = safe_int(hdata.get('totalDistance'))
-                    hits_list.append({
-                        "Batter": batter_name,
-                        "Play": des[:35] + "..." if len(des) > 35 else des,
-                        "Exit Vel (mph)": f"{ev_speed:.1f}",
-                        "Distance": f"{dist} ft",
-                        "Result": event_result,
-                        "ev_num": ev_speed,
-                        "dist_num": dist
-                    })
-                    
-        pitches_list = sorted(pitches_list, key=lambda x: x['val'], reverse=True)[:5]
-        for p in pitches_list: del p['val']
-        
-        hardest_raw = sorted(hits_list, key=lambda x: x['ev_num'], reverse=True)[:5]
-        clean_hardest = [{"Batter": h["Batter"], "Exit Vel (mph)": h["Exit Vel (mph)"], "Distance": h["Distance"], "Result": h["Result"]} for h in hardest_raw]
-            
-        furthest_raw = sorted(hits_list, key=lambda x: x['dist_num'], reverse=True)[:5]
-        clean_furthest = [{"Batter": h["Batter"], "Distance": h["Distance"], "Exit Vel (mph)": h["Exit Vel (mph)"], "Result": h["Result"]} for h in furthest_raw]
-            
-        return pitches_list, clean_hardest, clean_furthest
-    except Exception:
-        pass
-        
-    return [], [], []
-
 @st.cache_data(ttl=14400)
 def calculate_ai_projections(year):
     """Calculates 162-game AI pace projections for team record and star players."""
@@ -467,7 +379,8 @@ def get_injury_report(team_id):
                 il_players.append({
                     'Player': person.get('fullName', 'Unknown'),
                     'Pos': p.get('position', {}).get('abbreviation', ''),
-                    'Status': status.get('description', code)
+                    'Status': status.get('description', code),
+                    'Note': p.get('note', '') or '—'
                 })
     except Exception:
         pass
@@ -515,7 +428,7 @@ def get_shutdown_failures(team_id, season, days_back=45):
 
     for date_info in data.get('dates', []):
         for game in date_info.get('games', []):
-            if game.get('status', {}).get('detailedState') != 'Final':
+            if game.get('status', {}).get('detailedState') != 'Final' or game.get('gameType') != 'R':
                 continue
             game_date_str = game.get('gameDate', '')[:10]
             try:
@@ -593,7 +506,7 @@ def get_league_shutdown_benchmark(season):
 
     for date_info in data.get('dates', []):
         for game in date_info.get('games', []):
-            if game.get('status', {}).get('detailedState') != 'Final':
+            if game.get('status', {}).get('detailedState') != 'Final' or game.get('gameType') != 'R':
                 continue
             away = game['teams']['away']['team']
             home = game['teams']['home']['team']
@@ -647,7 +560,7 @@ def get_bullpen_fatigue(team_id, season, days_back=30):
 
     for date_info in data.get('dates', []):
         for game in date_info.get('games', []):
-            if game.get('status', {}).get('detailedState') != 'Final':
+            if game.get('status', {}).get('detailedState') != 'Final' or game.get('gameType') != 'R':
                 continue
             game_date_str = game.get('gameDate', '')[:10]
             try:
@@ -730,6 +643,7 @@ def get_team_snapshot(team_id, season):
                     return {
                         'wins': t.get('wins', 0),
                         'losses': t.get('losses', 0),
+                        'games_played': t.get('gamesPlayed', t.get('wins', 0) + t.get('losses', 0)),
                         'div_rank': t.get('divisionRank', '—'),
                         'gb': t.get('divisionGamesBack', '—'),
                         'streak': streak.get('streakCode', '—'),
@@ -823,7 +737,9 @@ def get_recent_pitching_splits(team_id, days_back=30):
                             'IP': s['stat'].get('inningsPitched', '0.0'),
                             'ERA': safe_float(s['stat'].get('era')),
                             'WHIP': safe_float(s['stat'].get('whip')),
-                            'K': safe_int(s['stat'].get('strikeOuts'))
+                            'K': safe_int(s['stat'].get('strikeOuts')),
+                            'G': safe_int(s['stat'].get('gamesPitched')),
+                            'GS': safe_int(s['stat'].get('gamesStarted'))
                         })
         return pd.DataFrame(rows)
     except Exception:
@@ -853,6 +769,127 @@ def get_team_news(team_name, limit=6):
     except Exception:
         return []
 
+@st.cache_data(ttl=3600)
+def get_last_n_record(team_id, n=10):
+    """Computes a team's record over their last N completed regular-season games."""
+    try:
+        end = datetime.now()
+        start = end - timedelta(days=45)
+        games = statsapi.schedule(team=team_id, start_date=start.strftime("%m/%d/%Y"), end_date=end.strftime("%m/%d/%Y"))
+        finals = [g for g in games if g['status'] == 'Final' and g.get('game_type') == 'R']
+        finals.sort(key=lambda g: g['game_date'])
+        last_n = finals[-n:]
+        wins, losses = 0, 0
+        for g in last_n:
+            is_home = g['home_id'] == team_id
+            t_score = safe_int(g['home_score'] if is_home else g['away_score'])
+            o_score = safe_int(g['away_score'] if is_home else g['home_score'])
+            if t_score > o_score:
+                wins += 1
+            else:
+                losses += 1
+        return f"{wins}-{losses}"
+    except Exception:
+        return "—"
+
+@st.cache_data(ttl=3600)
+def get_league_last10_records(season):
+    """Computes every active MLB team's record over their last 10 completed regular-season games."""
+    try:
+        valid_ids = {t['id'] for t in statsapi.get('teams', {'sportId': 1, 'activeStatus': 'Yes'}).get('teams', [])}
+        data = statsapi.get('schedule', {'sportId': 1, 'season': season, 'gameType': 'R', 'hydrate': 'linescore'})
+    except Exception:
+        return {}
+
+    team_games = defaultdict(list)
+    for date_info in data.get('dates', []):
+        for game in date_info.get('games', []):
+            if game.get('status', {}).get('detailedState') != 'Final' or game.get('gameType') != 'R':
+                continue
+            away, home = game['teams']['away'], game['teams']['home']
+            away_id, home_id = away['team']['id'], home['team']['id']
+            if away_id not in valid_ids or home_id not in valid_ids:
+                continue
+            date_str = game.get('gameDate', '')[:10]
+            a_score, h_score = safe_int(away.get('score')), safe_int(home.get('score'))
+            team_games[away_id].append((date_str, a_score > h_score))
+            team_games[home_id].append((date_str, h_score > a_score))
+
+    records = {}
+    for t_id, games in team_games.items():
+        games.sort(key=lambda x: x[0])
+        last10 = games[-10:]
+        w = sum(1 for _, won in last10 if won)
+        l = len(last10) - w
+        records[t_id] = f"{w}-{l}"
+    return records
+
+@st.cache_data(ttl=3600)
+def get_qualified_hitters(team_id, season, days_back=15):
+    """Splits recent hitting into qualified batters (season PA >= 3.1 x team games played)
+    and a single 'riser' - a non-qualified player with 25+ recent AB and the best recent AVG."""
+    try:
+        snap = get_team_snapshot(team_id, season)
+        team_gp = snap['games_played'] if snap else 0
+        threshold = 3.1 * team_gp
+
+        season_stats = statsapi.get('stats', {'season': season, 'stats': 'season', 'group': 'hitting', 'teamId': team_id})
+        season_pa = {}
+        for rec in season_stats.get('stats', []):
+            for split in rec.get('splits', []):
+                season_pa[split['player']['fullName']] = safe_int(split['stat'].get('plateAppearances'))
+
+        recent_df = get_recent_batting_splits(team_id, days_back)
+        if recent_df.empty:
+            return pd.DataFrame(), pd.DataFrame()
+
+        recent_df = recent_df.copy()
+        recent_df['Qualified'] = recent_df['Player'].apply(lambda n: season_pa.get(n, 0) >= threshold)
+        qualified = recent_df[recent_df['Qualified']].drop(columns=['Qualified'])
+
+        non_qual = recent_df[(~recent_df['Qualified']) & (recent_df['AB'] >= 25)].drop(columns=['Qualified'])
+        riser = pd.DataFrame()
+        if not non_qual.empty:
+            non_qual = non_qual.copy()
+            non_qual['avg_num'] = non_qual['AVG'].apply(safe_float)
+            riser = non_qual.sort_values(by='avg_num', ascending=False).head(1).drop(columns=['avg_num'])
+
+        return qualified, riser
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
+
+def get_headshot_url(player_id):
+    """Direct MLB static headshot image URL for a player id."""
+    return f"https://img.mlbstatic.com/mlb-photos/image/upload/w_213,d_people:generic:headshot:silo:current.png,q_auto:best,f_auto/v1/people/{player_id}/headshot/67/current"
+
+@st.cache_data(ttl=21600)
+def get_pitcher_quick_stats(pid, season):
+    """Fetches a pitcher's season W-L, ERA, and saves for a quick card display."""
+    try:
+        pstats = statsapi.player_stat_data(pid, group="pitching", type="season")
+        if pstats and pstats.get('stats'):
+            s = pstats['stats'][0]['stats']
+            return {'wins': s.get('wins', 0), 'losses': s.get('losses', 0), 'era': s.get('era', '—'), 'saves': s.get('saves', 0)}
+    except Exception:
+        pass
+    return None
+
+@st.cache_data(ttl=21600)
+def get_top_highlight(game_pk):
+    """Fetches the direct mp4 URL and headline for a game's top highlight clip."""
+    try:
+        content = statsapi.get('game_content', {'gamePk': game_pk})
+        items = content.get('highlights', {}).get('highlights', {}).get('items', [])
+        if not items:
+            return None, None
+        h = items[0]
+        for p in h.get('playbacks', []):
+            if p.get('name') == 'mp4Avc':
+                return p.get('url'), h.get('headline', 'Game Highlight')
+    except Exception:
+        pass
+    return None, None
+
 # ==========================================
 # 4. DASHBOARD HEADER & TAB SETUP
 # ==========================================
@@ -863,9 +900,9 @@ st.markdown("---")
 today = datetime.now()
 padres_roster_map = get_padres_roster_map(today.year)
 
-tab_brief, tab1, tab_injury, tab_series, tab2, tab_bullpen, tab3, tab4, tab5, tab6 = st.tabs([
-    "📋 Show Briefing", "📊 Padres Hub", "🏥 Injury Report", "🔭 Series Scout", "🎙️ Studio Prep",
-    "🎯 Bullpen & Shutdown", "🗣️ Fan Zone", "🌎 Around MLB", "🔬 Advanced Analytics", "🏆 Daily Rewind"
+tab1, tab_brief, tab_injury, tab_series, tab_bullpen, tab4, tab5, tab6 = st.tabs([
+    "📊 Padres Hub", "📋 Show Briefing", "🏥 Injury Report", "🔭 Series Scout",
+    "🎯 Bullpen & Shutdown", "🌎 Around MLB", "🔬 Advanced Analytics", "🏆 Daily Rewind"
 ])
 
 # ==========================================
@@ -1001,28 +1038,56 @@ with tab1:
             for idx, game in enumerate(completed_games):
                 with cols[idx]:
                     with st.container(border=True):
-                        st.markdown(f"#### {game['away_name']} @ {game['home_name']}")
-                        st.caption(f"🗓️ {game['game_date']}")
-                        st.markdown(f"**Score:** `{game['away_score']} - {game['home_score']}`")
-                        
-                        with st.expander("📊 Box Score, Statcast & 🎙️ Talking Points"):
+                        st.caption(f"🗓️ {game['game_date']} · FINAL")
+
+                        away_snap = get_team_snapshot(game['away_id'], today.year)
+                        home_snap = get_team_snapshot(game['home_id'], today.year)
+                        away_rec = f" ({away_snap['wins']}-{away_snap['losses']})" if away_snap else ""
+                        home_rec = f" ({home_snap['wins']}-{home_snap['losses']})" if home_snap else ""
+
+                        sc1, sc2 = st.columns([3, 1])
+                        with sc1:
+                            st.markdown(f"**{game['away_name']}**{away_rec}")
+                            st.markdown(f"**{game['home_name']}**{home_rec}")
+                        with sc2:
+                            st.markdown(f"`{game['away_score']}`")
+                            st.markdown(f"`{game['home_score']}`")
+
+                        try:
+                            game_data = statsapi.get('game', {'gamePk': game['game_id']})
+                        except Exception:
+                            game_data = {}
+                        decisions = game_data.get('liveData', {}).get('decisions', {})
+                        winner, loser, save = decisions.get('winner'), decisions.get('loser'), decisions.get('save')
+
+                        dp_entries = [('W', winner), ('L', loser)] + ([('SV', save)] if save else [])
+                        dp_cols = st.columns(len(dp_entries))
+                        for dp_idx, (label, person) in enumerate(dp_entries):
+                            if not person:
+                                continue
+                            with dp_cols[dp_idx]:
+                                qs = get_pitcher_quick_stats(person['id'], today.year)
+                                st.image(get_headshot_url(person['id']), width=48)
+                                st.caption(f"**{label}: {person['fullName']}**")
+                                if qs:
+                                    if label == 'SV':
+                                        st.caption(f"{qs['saves']} SV")
+                                    else:
+                                        st.caption(f"{qs['wins']}-{qs['losses']}, {qs['era']} ERA")
+
+                        with st.expander("📊 Box Score, Standout Performers & Highlight"):
                             w_p = game.get('winning_pitcher', 'None')
-                            l_p = game.get('losing_pitcher', 'None')
                             sv_p = game.get('save_pitcher', '')
-                            p_summary = f"**W:** {w_p if w_p else 'N/A'} | **L:** {l_p if l_p else 'N/A'}"
-                            if sv_p and sv_p not in ['None', '']: p_summary += f" | **SV:** {sv_p}"
-                            st.markdown(f"⚾ **Decision Pitchers:** {p_summary}")
-                            
                             is_padres_home = "Padres" in game['home_name']
                             padres_score = game['home_score'] if is_padres_home else game['away_score']
                             padres_batters_key = 'homeBatters' if is_padres_home else 'awayBatters'
                             padres_won = (is_padres_home and game['home_score'] > game['away_score']) or (not is_padres_home and game['away_score'] > game['home_score'])
-                            
+
                             padres_performers = []
                             if padres_won:
                                 if w_p and w_p != 'None': padres_performers.append(f"⚾ **{w_p}** (WIN)")
                                 if sv_p and sv_p not in ['None', '']: padres_performers.append(f"🔒 **{sv_p}** (SAVE)")
-                                    
+
                             try:
                                 box = statsapi.boxscore_data(game['game_id'])
                                 hr_hitters, rbi_hitters = [], []
@@ -1033,66 +1098,46 @@ with tab1:
                                         h, ab = safe_int(b.get('h', b.get('hits'))), safe_int(b.get('ab', b.get('atBats')))
                                         if hr > 0: hr_hitters.append(f"💣 **{name}**: {hr} HR, {rbi} RBI ({h}-{ab})")
                                         elif rbi > 0: rbi_hitters.append(f"🏏 **{name}**: {rbi} RBI ({h}-{ab})")
-                                            
+
                                 if hr_hitters: padres_performers.extend(hr_hitters)
                                 elif padres_score == 1 and rbi_hitters: padres_performers.extend(rbi_hitters)
                                 elif padres_score > 1 and rbi_hitters: padres_performers.extend(rbi_hitters[:2])
                             except Exception:
                                 pass
-                                
+
                             top_3 = padres_performers[:3]
                             if top_3:
                                 st.markdown("**🌟 Standout Performers:**")
                                 for perf in top_3: st.markdown(f"- {perf}")
-                            
+
                             st.markdown("---")
                             try:
-                                game_data = statsapi.get('game', {'gamePk': game['game_id']})
                                 linescore = game_data.get('liveData', {}).get('linescore', {})
                                 innings = linescore.get('innings', [])
                                 headers = ['Team'] + [str(i + 1) for i in range(len(innings))] + ['R', 'H', 'E']
                                 away_row, home_row = [game['away_name']], [game['home_name']]
-                                
+
                                 for inn in innings:
                                     away_row.append(inn.get('away', {}).get('runs', 0))
                                     hruns = inn.get('home', {}).get('runs', '')
                                     home_row.append(hruns if hruns != '' else '-')
-                                    
+
                                 teams_t = linescore.get('teams', {})
                                 away_row.extend([teams_t.get('away', {}).get('runs', 0), teams_t.get('away', {}).get('hits', 0), teams_t.get('away', {}).get('errors', 0)])
                                 home_row.extend([teams_t.get('home', {}).get('runs', 0), teams_t.get('home', {}).get('hits', 0), teams_t.get('home', {}).get('errors', 0)])
                                 st.dataframe(pd.DataFrame([away_row, home_row], columns=headers), width='stretch', hide_index=True)
                             except Exception:
                                 st.caption("Inning-by-inning data unavailable.")
-                                
+
                             st.markdown("---")
-                            st.markdown("🚀 **Baseball Savant & Statcast Leaders**")
-                            t_pitches, t_hard, t_dist = get_savant_game_leaderboards(game['game_id'])
-                            s_col1, s_col2, s_col3 = st.columns(3)
-                            with s_col1:
-                                st.markdown("⚡ **Fastest Pitches**")
-                                if t_pitches:
-                                    st.dataframe(pd.DataFrame(t_pitches), width='stretch', hide_index=True)
-                                else:
-                                    st.caption("No velocity data.")
-                            with s_col2:
-                                st.markdown("🔥 **Hardest Hit**")
-                                if t_hard:
-                                    st.dataframe(pd.DataFrame(t_hard), width='stretch', hide_index=True)
-                                else:
-                                    st.caption("No exit velocity data.")
-                            with s_col3:
-                                st.markdown("📏 **Hit Distance**")
-                                if t_dist:
-                                    st.dataframe(pd.DataFrame(t_dist), width='stretch', hide_index=True)
-                                else:
-                                    st.caption("No distance data.")
-                                
-                            st.markdown("---")
-                            search_term = f"{game['away_name']} vs {game['home_name']} {game['game_date']} highlights".replace(" ", "+")
-                            st.markdown(f"📺 **[Watch Game Highlights on YouTube](https://www.youtube.com/results?search_query={search_term})**")
-                            st.markdown("---")
-                            for t in get_game_topics(game): st.markdown(f"- {t}")
+                            st.markdown("📺 **Top Highlight**")
+                            video_url, headline = get_top_highlight(game['game_id'])
+                            if video_url:
+                                st.video(video_url)
+                                st.caption(headline)
+                            else:
+                                search_term = f"{game['away_name']} vs {game['home_name']} {game['game_date']} highlights".replace(" ", "+")
+                                st.markdown(f"**[Watch on YouTube](https://www.youtube.com/results?search_query={search_term})**")
         else:
             st.info("No completed games found recently.")
     except Exception as e:
@@ -1214,7 +1259,7 @@ with tab_injury:
     st.markdown("---")
 
     il_list = get_injury_report(135)
-    ic1, ic2 = st.columns([1, 1.2])
+    ic1, ic2 = st.columns([1.4, 1])
 
     with ic1:
         st.markdown("#### 🩹 Currently on the Injured List")
@@ -1249,8 +1294,9 @@ with tab_series:
     else:
         snap = get_team_snapshot(opp_id, today.year)
         series_record = get_season_series_record(opp_id, today.year)
+        last10 = get_last_n_record(opp_id, 10)
 
-        hc1, hc2, hc3, hc4 = st.columns(4)
+        hc1, hc2, hc3, hc4, hc5 = st.columns(5)
         with hc1:
             dates = ", ".join(g['game_date'][5:] for g in series_games)
             venue = "Home" if series_games[0]['home_id'] == 135 else "Away"
@@ -1262,46 +1308,84 @@ with tab_series:
             else:
                 st.metric(f"{opp_name} Record", "—")
         with hc3:
+            st.metric("Last 10", last10)
+        with hc4:
             if snap:
                 st.metric("Division Rank", f"#{snap['div_rank']}", delta=f"GB: {snap['gb']}")
             else:
                 st.metric("Division Rank", "—")
-        with hc4:
+        with hc5:
             st.metric("Season Series vs SD", series_record)
 
         st.markdown("---")
         st.markdown(f"### 🌡️ Who's Hot & Who's Cold: {opp_name} Hitters (Last 15 Days)")
-        bat_df = get_recent_batting_splits(opp_id, 15)
+        st.caption("Limited to qualified batters (season PA ≥ 3.1 × team games played), plus a 🆕 riser: a non-qualified player with 25+ recent AB leading the team in AVG.")
+        qualified_df, riser_df = get_qualified_hitters(opp_id, today.year, 15)
         h1, h2 = st.columns(2)
         with h1:
-            st.markdown("#### 🔥 Hot Hitters")
-            if not bat_df.empty:
-                st.dataframe(bat_df.sort_values(by='OPS', ascending=False).head(5), width='stretch', hide_index=True)
+            st.markdown("#### 🔥 Hot Hitters (Most HR)")
+            if not qualified_df.empty:
+                hot_hitters = qualified_df.sort_values(by='HR', ascending=False).head(5).copy()
+                if not riser_df.empty:
+                    riser_row = riser_df.copy()
+                    riser_row['Player'] = riser_row['Player'] + ' 🆕'
+                    hot_hitters = pd.concat([hot_hitters, riser_row], ignore_index=True)
+                st.dataframe(hot_hitters, width='stretch', hide_index=True)
             else:
                 st.caption("Recent hitting data updating...")
         with h2:
-            st.markdown("#### 🥶 Cold Hitters")
-            if not bat_df.empty:
-                st.dataframe(bat_df.sort_values(by='OPS', ascending=True).head(5), width='stretch', hide_index=True)
+            st.markdown("#### 🥶 Cold Hitters (Lowest AVG)")
+            if not qualified_df.empty:
+                cold_hitters = qualified_df.copy()
+                cold_hitters['avg_num'] = cold_hitters['AVG'].apply(safe_float)
+                cold_hitters = cold_hitters.sort_values(by='avg_num', ascending=True).head(5).drop(columns=['avg_num'])
+                st.dataframe(cold_hitters, width='stretch', hide_index=True)
             else:
                 st.caption("Recent hitting data updating...")
 
         st.markdown("---")
         st.markdown(f"### ⚾ Arms: Hot & Cold (Last 30 Days)")
         pitch_df = get_recent_pitching_splits(opp_id, 30)
-        p1, p2 = st.columns(2)
-        with p1:
-            st.markdown("#### 🔥 Hot Arms (Lowest ERA)")
-            if not pitch_df.empty:
-                st.dataframe(pitch_df.sort_values(by='ERA', ascending=True).head(5), width='stretch', hide_index=True)
+        if not pitch_df.empty:
+            starters_df = pitch_df[pitch_df['GS'] > 0].drop(columns=['GS', 'G'])
+            relievers_df = pitch_df[(pitch_df['GS'] == 0) & (pitch_df['G'] >= 3)].drop(columns=['GS'])
+        else:
+            starters_df, relievers_df = pd.DataFrame(), pd.DataFrame()
+
+        st.markdown("#### 🎯 Starters")
+        st.caption("Hot = ranked by strikeouts if K > IP, otherwise by innings pitched. Cold = highest ERA.")
+        sp1, sp2 = st.columns(2)
+        with sp1:
+            st.markdown("🔥 **Hot Starters**")
+            if not starters_df.empty:
+                hot_starters = starters_df.copy()
+                hot_starters['sort_key'] = hot_starters.apply(lambda r: r['K'] if r['K'] > safe_float(r['IP']) else safe_float(r['IP']), axis=1)
+                hot_starters = hot_starters.sort_values(by='sort_key', ascending=False).head(5).drop(columns=['sort_key'])
+                st.dataframe(hot_starters, width='stretch', hide_index=True)
             else:
-                st.caption("Recent pitching data updating...")
-        with p2:
-            st.markdown("#### 🥶 Cold Arms (Highest ERA)")
-            if not pitch_df.empty:
-                st.dataframe(pitch_df.sort_values(by='ERA', ascending=False).head(5), width='stretch', hide_index=True)
+                st.caption("No qualifying starters in this window.")
+        with sp2:
+            st.markdown("🥶 **Cold Starters**")
+            if not starters_df.empty:
+                st.dataframe(starters_df.sort_values(by='ERA', ascending=False).head(5), width='stretch', hide_index=True)
             else:
-                st.caption("Recent pitching data updating...")
+                st.caption("No qualifying starters in this window.")
+
+        st.markdown("#### 💪 Relievers")
+        st.caption("Ranked by ERA, minimum 3 appearances in the window.")
+        rp1, rp2 = st.columns(2)
+        with rp1:
+            st.markdown("🔥 **Hot Relievers (Lowest ERA)**")
+            if not relievers_df.empty:
+                st.dataframe(relievers_df.sort_values(by='ERA', ascending=True).head(5), width='stretch', hide_index=True)
+            else:
+                st.caption("No qualifying relievers in this window.")
+        with rp2:
+            st.markdown("🥶 **Cold Relievers (Highest ERA)**")
+            if not relievers_df.empty:
+                st.dataframe(relievers_df.sort_values(by='ERA', ascending=False).head(5), width='stretch', hide_index=True)
+            else:
+                st.caption("No qualifying relievers in this window.")
 
         st.markdown("---")
         st.markdown(f"### 🏥 {opp_name} Injury Report")
@@ -1323,47 +1407,6 @@ with tab_series:
                         st.caption(f"{n['source']} · {n['published']}" if n['source'] else n['published'])
         else:
             st.caption("News feed unavailable.")
-
-# ==========================================
-# TAB 2: STUDIO PREP
-# ==========================================
-with tab2:
-    st.markdown("### 🎙️ Radio Prep & Talking Points")
-    st.markdown("---")
-    p1, p2 = st.columns(2)
-
-    with p1:
-        st.markdown("#### 🗣️ Pulse of the Fanbase")
-        with st.container(border=True):
-            try:
-                res = requests.get("https://www.reddit.com/r/Padres/comments.rss", headers={'User-Agent': 'PadresRadioApp/1.0'}, timeout=5)
-                feed = feedparser.parse(res.content if res.status_code == 200 else "https://www.reddit.com/r/Padres/comments.rss")
-                for entry in feed.entries[:4]:
-                    author = entry.get('author', 'PadresFan').replace('/u/', '')
-                    comment = entry.get('title', '').split("comment on")[0]
-                    st.markdown(f"**🤎 {author}**: \"{comment.strip()}\"")
-                    st.markdown("---")
-            except Exception:
-                st.info("🔄 Fanbase comments syncing...")
-
-        st.markdown("#### 👀 Rival Watch (NL West)")
-        with st.container(border=True):
-            try:
-                r_games = statsapi.schedule(date=today.strftime("%m/%d/%Y"))
-                for g in r_games:
-                    if g['away_id'] in [119, 109, 137] or g['home_id'] in [119, 109, 137]:
-                        st.markdown(f"**{g['away_name']}** @ **{g['home_name']}**")
-                        st.caption(f"Score: `{g['away_score']} - {g['home_score']}` ({g['status']})")
-                        st.markdown("---")
-            except Exception:
-                st.caption("Rival scores updating...")
-
-    with p2:
-        st.markdown("#### 🧠 Daily Padres Trivia")
-        with st.container(border=True):
-            t = random.choice(TRIVIA_BANK)
-            st.markdown(f"**Question:** {t['q']}")
-            with st.expander("Reveal Answer"): st.success(f"**Answer:** {t['a']}")
 
 # ==========================================
 # TAB: BULLPEN & SHUTDOWN REPORT
@@ -1417,99 +1460,15 @@ with tab_bullpen:
         st.caption("League benchmark data updating...")
 
 # ==========================================
-# TAB 3: FAN ZONE
-# ==========================================
-with tab3:
-    st.markdown("### 🗞️ Padres Local Press & Fan Buzz")
-    st.markdown("---")
-    feeds = {
-        "📰 SD Union-Tribune (Padres)": "https://www.sandiegouniontribune.com/sports/padres/feed/",
-        "⚾ MLB.com Official": "https://www.mlb.com/padres/feeds/news/rss.xml",
-        "🗣️ Gaslamp Ball": "https://www.gaslampball.com/rss/current.xml"
-    }
-    cols = st.columns(3)
-    for idx, (s_name, url) in enumerate(feeds.items()):
-        with cols[idx]:
-            st.markdown(f"#### {s_name}")
-            try:
-                res = requests.get(url, headers={'User-Agent': 'PadresRadioApp/1.0'}, timeout=5)
-                feed = feedparser.parse(res.content if res.status_code == 200 else url)
-                for entry in feed.entries[:5]:
-                    with st.container(border=True):
-                        st.markdown(f"**[{entry.title}]({entry.link})**")
-                        if hasattr(entry, 'published'): st.caption(f"🗓️ {entry.published[:16]}")
-            except Exception:
-                st.caption("Feed temporarily unavailable.")
-
-# ==========================================
 # TAB 4: AROUND MLB (DEDICATED MLB TRADE RUMORS)
 # ==========================================
 with tab4:
     st.markdown("### 🌎 Major League Baseball Command Center")
     st.markdown("---")
-    m1, m2 = st.columns([1.1, 1.9])
 
-    with m1:
-        st.markdown("#### 🔥 MLB Trade Rumors Wire")
-        with st.container(border=True):
-            try:
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PadresRadioApp/1.0'}
-                res = requests.get("https://www.mlbtraderumors.com/feed", headers=headers, timeout=5)
-                feed = feedparser.parse(res.content if res.status_code == 200 else "https://www.mlbtraderumors.com/feed")
-                
-                if feed.entries:
-                    for entry in feed.entries[:7]:
-                        st.markdown(f"**[{entry.title}]({entry.link})**")
-                        if hasattr(entry, 'published') and entry.published:
-                            st.caption(f"⏱️ {entry.published[:16]}")
-                        if hasattr(entry, 'summary') and entry.summary:
-                            clean_summary = entry.summary.replace('<p>', '').replace('</p>', '').replace('<br>', '').replace('<br/>', '')
-                            if len(clean_summary) > 130:
-                                clean_summary = clean_summary[:130] + "..."
-                            st.caption(clean_summary)
-                        st.markdown("---")
-                else:
-                    st.caption("No recent rumors found.")
-            except Exception:
-                st.caption("MLB Trade Rumors feed updating...")
-
-    with m2:
-        st.markdown(f"#### 🌟 MLB Stat Leaders ({today.year})")
-        with st.container(border=True):
-            lt1, lt2, lt3, lt4 = st.tabs(["💣 Home Runs", "📈 OPS", "⚾ ERA", "🔥 Strikeouts"])
-            
-            with lt1:
-                hr_df = get_clean_leaders('homeRuns', 'hitting', today.year)
-                if not hr_df.empty:
-                    st.dataframe(hr_df, width='stretch', hide_index=True)
-                else:
-                    st.caption("Home Run leaders updating...")
-                    
-            with lt2:
-                ops_df = get_clean_leaders('onBasePlusSlugging', 'hitting', today.year)
-                if not ops_df.empty:
-                    st.dataframe(ops_df, width='stretch', hide_index=True)
-                else:
-                    st.caption("OPS leaders updating...")
-                    
-            with lt3:
-                era_df = get_clean_leaders('earnedRunAverage', 'pitching', today.year)
-                if not era_df.empty:
-                    st.dataframe(era_df, width='stretch', hide_index=True)
-                else:
-                    st.caption("ERA leaders updating...")
-                    
-            with lt4:
-                so_df = get_clean_leaders('strikeouts', 'pitching', today.year)
-                if not so_df.empty:
-                    st.dataframe(so_df, width='stretch', hide_index=True)
-                else:
-                    st.caption("Strikeout leaders updating...")
-
-    st.markdown("---")
     st.markdown("### 🎫 Live Postseason Wild Card Race")
     wc_col1, wc_col2 = st.columns(2)
-    
+
     with wc_col1:
         st.markdown("#### 🟦 National League Wild Card")
         nl_wc_df = get_wildcard_standings(104)
@@ -1517,7 +1476,7 @@ with tab4:
             st.dataframe(nl_wc_df, width='stretch', hide_index=True)
         else:
             st.caption("NL Wild Card standings updating...")
-            
+
     with wc_col2:
         st.markdown("#### 🟥 American League Wild Card")
         al_wc_df = get_wildcard_standings(103)
@@ -1528,7 +1487,15 @@ with tab4:
 
     st.markdown("---")
     st.markdown("### 🏆 Full MLB Division Matrix")
-    
+    last10_map = get_league_last10_records(today.year)
+
+    def with_last10(df):
+        if df.empty or '_id' not in df.columns:
+            return df
+        out = df.copy()
+        out['L10'] = out['_id'].apply(lambda i: last10_map.get(i, '—'))
+        return out.drop(columns=['_id'])
+
     st.markdown("#### 🟦 National League Divisions")
     nl_c1, nl_c2, nl_c3 = st.columns(3)
     nl_divs = get_full_standings(104)
@@ -1536,7 +1503,7 @@ with tab4:
         col = nl_c1 if "East" in d_name else (nl_c2 if "Central" in d_name else nl_c3)
         with col:
             st.markdown(f"**{d_name}**")
-            st.dataframe(df, width='stretch', hide_index=True)
+            st.dataframe(with_last10(df), width='stretch', hide_index=True)
 
     st.markdown("#### 🟥 American League Divisions")
     al_c1, al_c2, al_c3 = st.columns(3)
@@ -1545,7 +1512,68 @@ with tab4:
         col = al_c1 if "East" in d_name else (al_c2 if "Central" in d_name else al_c3)
         with col:
             st.markdown(f"**{d_name}**")
-            st.dataframe(df, width='stretch', hide_index=True)
+            st.dataframe(with_last10(df), width='stretch', hide_index=True)
+
+    st.markdown("---")
+    st.markdown(f"### 🌟 MLB Stat Leaders ({today.year})")
+    scope = st.radio("Scope", ["MLB", "NL", "AL"], horizontal=True, key="stat_leader_scope")
+    league_id = {"NL": 104, "AL": 103, "MLB": None}[scope]
+    with st.container(border=True):
+        lt1, lt2, lt3, lt4 = st.tabs(["💣 Home Runs", "📈 OPS", "⚾ ERA", "🔥 Strikeouts"])
+
+        with lt1:
+            hr_df = get_clean_leaders('homeRuns', 'hitting', today.year, league_id)
+            if not hr_df.empty:
+                st.dataframe(hr_df, width='stretch', hide_index=True)
+            else:
+                st.caption("Home Run leaders updating...")
+
+        with lt2:
+            ops_df = get_clean_leaders('onBasePlusSlugging', 'hitting', today.year, league_id)
+            if not ops_df.empty:
+                st.dataframe(ops_df, width='stretch', hide_index=True)
+            else:
+                st.caption("OPS leaders updating...")
+
+        with lt3:
+            era_df = get_clean_leaders('earnedRunAverage', 'pitching', today.year, league_id)
+            if not era_df.empty:
+                st.dataframe(era_df, width='stretch', hide_index=True)
+            else:
+                st.caption("ERA leaders updating...")
+
+        with lt4:
+            so_df = get_clean_leaders('strikeouts', 'pitching', today.year, league_id)
+            if not so_df.empty:
+                st.dataframe(so_df, width='stretch', hide_index=True)
+            else:
+                st.caption("Strikeout leaders updating...")
+
+    st.markdown("---")
+    st.markdown("### 🔥 MLB Trade Rumors & News")
+    with st.container(border=True):
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PadresRadioApp/1.0'}
+            res = requests.get("https://www.mlbtraderumors.com/feed", headers=headers, timeout=5)
+            feed = feedparser.parse(res.content if res.status_code == 200 else "https://www.mlbtraderumors.com/feed")
+
+            if feed.entries:
+                news_cols = st.columns(3)
+                for idx, entry in enumerate(feed.entries[:9]):
+                    with news_cols[idx % 3]:
+                        st.markdown(f"**[{entry.title}]({entry.link})**")
+                        if hasattr(entry, 'published') and entry.published:
+                            st.caption(f"⏱️ {entry.published[:16]}")
+                        if hasattr(entry, 'summary') and entry.summary:
+                            clean_summary = entry.summary.replace('<p>', '').replace('</p>', '').replace('<br>', '').replace('<br/>', '')
+                            if len(clean_summary) > 130:
+                                clean_summary = clean_summary[:130] + "..."
+                            st.caption(clean_summary)
+                        st.markdown("---")
+            else:
+                st.caption("No recent rumors found.")
+        except Exception:
+            st.caption("MLB Trade Rumors feed updating...")
 
 # ==========================================
 # TAB 5: ADVANCED ANALYTICS
