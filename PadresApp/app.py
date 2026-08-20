@@ -1045,13 +1045,16 @@ with tab1:
                         away_rec = f" ({away_snap['wins']}-{away_snap['losses']})" if away_snap else ""
                         home_rec = f" ({home_snap['wins']}-{home_snap['losses']})" if home_snap else ""
 
-                        sc1, sc2 = st.columns([3, 1])
-                        with sc1:
-                            st.markdown(f"**{game['away_name']}**{away_rec}")
-                            st.markdown(f"**{game['home_name']}**{home_rec}")
-                        with sc2:
-                            st.markdown(f"`{game['away_score']}`")
-                            st.markdown(f"`{game['home_score']}`")
+                        st.markdown(f"""
+<div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+  <span><b>{game['away_name']}</b>{away_rec}</span>
+  <span style="font-family:monospace; font-size:1.15em; font-weight:bold; flex-shrink:0;">{game['away_score']}</span>
+</div>
+<div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+  <span><b>{game['home_name']}</b>{home_rec}</span>
+  <span style="font-family:monospace; font-size:1.15em; font-weight:bold; flex-shrink:0;">{game['home_score']}</span>
+</div>
+""", unsafe_allow_html=True)
 
                         try:
                             game_data = statsapi.get('game', {'gamePk': game['game_id']})
